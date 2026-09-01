@@ -32,7 +32,7 @@ app.get('/api/balance/:userId', (req, res) => {
 
 // 2. Register New User
 app.post('/api/register', async (req, res) => {
-    const { userId, firstName, username } = req.body;
+    const { userId, firstName, username, phone } = req.body;
     
     if (registeredUsers[userId]) {
         return res.status(400).json({ error: "Already registered" });
@@ -46,7 +46,7 @@ app.post('/api/register', async (req, res) => {
 
     // Send notification to your Private Telegram Channel
     try {
-        const message = `🚨 *New Player Registered!*\n\n👤 Name: ${firstName}\n🔗 Username: @${username || 'N/A'}\n🆔 ID: ${userId}\n💰 Bonus Given: 10 ETB`;
+        const message = `🚨 *New Player Registered!*\n\n👤 Name: ${firstName}\n🔗 Username: @${username || 'N/A'}\n🆔 ID: ${userId}\n📱 Phone: ${phone || 'N/A'}\n💰 Bonus Given: 10 ETB`;
         const tgUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
         
         await fetch(tgUrl, {
