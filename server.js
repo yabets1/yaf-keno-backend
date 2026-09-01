@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
-app.use(express.json({ limit: '10mb' })); // Allows large image uploads for receipts
+app.use(express.json({ limit: '20mb' })); // Allows large image uploads for receipts
 
 // In-memory databases (Resets when free Render server sleeps)
 let userBalances = {};
