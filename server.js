@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Allows large image uploads for receipts
 
 // In-memory databases (Resets when free Render server sleeps)
 let userBalances = {};
@@ -17,11 +17,21 @@ let registeredUsers = {};
 const TELEGRAM_BOT_TOKEN = '8817002947:AAHLpPF5F4QH7GNKIaxoxBEv9wOth_TumIk'; 
 const TELEGRAM_REGISTRATION_CHANNEL_ID = 'ID: -1004345822083'; 
 const TELEGRAM_WITHDRAWAL_CHANNEL_ID = 'ID: -1003903639876'; 
+const TELEGRAM_DEPOSIT_CHANNEL_ID = 'ID: -1004338096507';
 // ==========================================
+
+// Friendly Root Message
+app.get('/', (req, res) => {
+    res.send('Welcome to the BRIGHTEN.BET API! Server is running perfectly.');
+});
 
 // 1. Check Balance & Registration Status
 app.get('/api/balance/:userId', (req, res) => {
     const userId = req.params.userId;
+    
+    if (userId === 'browser_test') {
+        return res.json({ balance: 50 }); // Friendly test route
+    }
     
     // If they aren't registered, tell the frontend to show the popup!
     if (!registeredUsers[userId]) {
@@ -60,7 +70,7 @@ app.post('/api/register', async (req, res) => {
             })
         });
     } catch (err) {
-        console.error("Failed to send Telegram registration notification");
+        console.error("Failed to send Telegram registration notification", err);
     }
 
     res.json({ success: true, balance: userBalances[userId] });
@@ -88,44 +98,19 @@ app.post('/api/win', (req, res) => {
     res.json({ success: true, newBalance: userBalances[userId] });
 });
 
-// 5. Instant Deposit API (Removed 5-second delay)
-app.post('/api/deposit/telebirr-push', (req, res) => {
-    const { userId, amount, phone } = req.body;
-    
-    console.log(`Processing instant deposit for ${phone} for ${amount} ETB...`);
-
-    if (!userBalances[userId]) userBalances[userId] = 0;
-    userBalances[userId] += amount;
-    
-    console.log(`Payment confirmed! Added ${amount} to user ${userId}.`);
-    
-    res.json({ 
-        success: true, 
-        newBalance: userBalances[userId]
-    });
-});
-
-// 6. Telebirr Webhook (Placeholder for real SDK callback)
-app.post('/api/telebirr/callback', (req, res) => {
-    console.log("Received payment confirmation from Telebirr!");
-    res.send("0"); // Tell Telebirr we successfully received the notification
-});
-
-// 7. Withdrawal Request (Sends to Telegram)
+// 5. Withdrawal Request to Admin Channel
 app.post('/api/withdraw', async (req, res) => {
     const { userId, firstName, username, paymentMethod, accountNumber, amount } = req.body;
-    
-    if (!registeredUsers[userId]) return res.status(400).json({ error: "Not registered" });
+
     if (!userBalances[userId] || userBalances[userId] < amount) {
-        return res.status(400).json({ error: "Insufficient funds" });
+        return res.status(400).json({ success: false, error: "Insufficient balance" });
     }
 
-    // Deduct balance immediately to prevent double withdrawal
+    // Deduct the money immediately so they can't double-spend
     userBalances[userId] -= amount;
 
-    // Send notification to your Private Telegram Channel for WITHDRAWALS
     try {
-        const message = `💸 *New Withdrawal Request!*\n\n👤 Name: ${firstName}\n🔗 Username: @${username || 'N/A'}\n🆔 ID: ${userId}\n🏦 Method: ${paymentMethod.toUpperCase()}\n📱 Account No: ${accountNumber}\n💰 Amount: ${amount} ETB`;
+        const message = `💸 *New Withdrawal Request!*\n\n👤 Name: ${firstName}\n🔗 Username: @${username || 'N/A'}\n🆔 ID: ${userId}\n🏦 Method: ${paymentMethod.toUpperCase()}\n💳 Account No: \`${accountNumber}\`\n💵 Amount: ${amount} ETB`;
         const tgUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
         
         await fetch(tgUrl, {
@@ -137,11 +122,120 @@ app.post('/api/withdraw', async (req, res) => {
                 parse_mode: 'Markdown'
             })
         });
-    } catch (err) {
-        console.error("Failed to send Telegram withdrawal notification");
-    }
 
-    res.json({ success: true, newBalance: userBalances[userId] });
+        res.json({ success: true, newBalance: userBalances[userId] });
+    } catch (err) {
+        console.error("Failed to send withdrawal notification", err);
+        // If it fails to send to Telegram, refund the user
+        userBalances[userId] += amount;
+        res.status(500).json({ success: false, error: "Network error sending request." });
+    }
+});
+
+// 6. Deposit Request with Receipt Image (Sends to Telegram with Approve/Reject buttons)
+app.post('/api/deposit/request', async (req, res) => {
+    const { userId, firstName, username, paymentMethod, amount, receiptBase64 } = req.body;
+
+    try {
+        const message = `💰 *New Deposit Request!*\n\n👤 Name: ${firstName}\n🔗 Username: @${username || 'N/A'}\n🆔 ID: ${userId}\n🏦 Method: ${paymentMethod.toUpperCase()}\n💵 Amount: ${amount} ETB`;
+        
+        // Convert Base64 image back into a file format for Telegram
+        const base64Data = receiptBase64.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64Data, 'base64');
+        const blob = new Blob([buffer], { type: 'image/jpeg' });
+        
+        const formData = new FormData();
+        formData.append('chat_id', TELEGRAM_DEPOSIT_CHANNEL_ID);
+        formData.append('photo', blob, 'receipt.jpg');
+        formData.append('caption', message);
+        formData.append('parse_mode', 'Markdown');
+        
+        // Add Interactive Approve/Reject Buttons to the Telegram message
+        formData.append('reply_markup', JSON.stringify({
+            inline_keyboard: [
+                [
+                    { text: "✅ APPROVE", callback_data: `dep_yes_${userId}_${amount}` },
+                    { text: "❌ REJECT", callback_data: `dep_no_${userId}_${amount}` }
+                ]
+            ]
+        }));
+
+        const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const tgResult = await response.json();
+        
+        if (!tgResult.ok) {
+            console.error("Telegram API Error:", tgResult);
+            return res.status(500).json({ success: false, error: "Failed to send to Telegram" });
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error("Failed to send deposit request", err);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
+// 7. Webhook to Handle Telegram Button Clicks (Approve/Reject)
+app.post('/api/telegram/webhook', async (req, res) => {
+    const update = req.body;
+    
+    if (update.callback_query) {
+        const data = update.callback_query.data;
+        const msgId = update.callback_query.message.message_id;
+        const chatId = update.callback_query.message.chat.id;
+        const originalCaption = update.callback_query.message.caption || "";
+
+        try {
+            if (data.startsWith('dep_yes_')) {
+                const parts = data.split('_');
+                const userId = parts[2];
+                const amount = parseFloat(parts[3]);
+
+                // Give the user their money!
+                if (!userBalances[userId]) userBalances[userId] = 0;
+                userBalances[userId] += amount;
+
+                // Edit the Telegram message so the buttons disappear
+                await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageCaption`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        message_id: msgId,
+                        caption: originalCaption + `\n\n✅ *APPROVED* by Admin. ${amount} ETB added!`,
+                        parse_mode: 'Markdown'
+                    })
+                });
+            } else if (data.startsWith('dep_no_')) {
+                // Just edit the message to say rejected
+                await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageCaption`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        message_id: msgId,
+                        caption: originalCaption + `\n\n❌ *REJECTED* by Admin.`,
+                        parse_mode: 'Markdown'
+                    })
+                });
+            }
+
+            // Tell Telegram the button was clicked so it stops loading
+            await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ callback_query_id: update.callback_query.id })
+            });
+        } catch(e) {
+            console.error("Webhook error:", e);
+        }
+    }
+    // Always acknowledge the webhook quickly
+    res.sendStatus(200);
 });
 
 // Start the server
