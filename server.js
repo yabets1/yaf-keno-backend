@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
-app.use(express.json({ limit: '30mb' })); // Allows large image uploads for receipts
+app.use(express.json({ limit: '50mb' })); // Increased to 50mb for high-res phone screenshots
 
 // In-memory databases (Resets when free Render server sleeps)
 let userBalances = {};
@@ -19,19 +19,9 @@ const TELEGRAM_REGISTRATION_CHANNEL_ID = '-1004345822083';
 const TELEGRAM_WITHDRAWAL_CHANNEL_ID = '-1003903639876'; 
 const TELEGRAM_DEPOSIT_CHANNEL_ID = '-1004338096507';
 // ==========================================
-
-// Friendly Root Message
-app.get('/', (req, res) => {
-    res.send('Welcome to the BRIGHTEN.BET API! Server is running perfectly.');
-});
-
 // 1. Check Balance & Registration Status
 app.get('/api/balance/:userId', (req, res) => {
     const userId = req.params.userId;
-    
-    if (userId === 'browser_test') {
-        return res.json({ balance: 50 }); // Friendly test route
-    }
     
     // If they aren't registered, tell the frontend to show the popup!
     if (!registeredUsers[userId]) {
@@ -70,7 +60,7 @@ app.post('/api/register', async (req, res) => {
             })
         });
     } catch (err) {
-        console.error("Failed to send Telegram registration notification", err);
+        console.error("Failed to send Telegram registration notification");
     }
 
     res.json({ success: true, balance: userBalances[userId] });
@@ -88,51 +78,7 @@ app.post('/api/bet', (req, res) => {
     res.json({ success: true, newBalance: userBalances[userId] });
 });
 
-// 4. Process Win (Add Money)
-app.post('/api/win', (req, res) => {
-    const { userId, winAmount } = req.body;
-    
-    if (!userBalances[userId]) userBalances[userId] = 0;
-    
-    userBalances[userId] += winAmount;
-    res.json({ success: true, newBalance: userBalances[userId] });
-});
-
-// 5. Withdrawal Request to Admin Channel
-app.post('/api/withdraw', async (req, res) => {
-    const { userId, firstName, username, paymentMethod, accountNumber, amount } = req.body;
-
-    if (!userBalances[userId] || userBalances[userId] < amount) {
-        return res.status(400).json({ success: false, error: "Insufficient balance" });
-    }
-
-    // Deduct the money immediately so they can't double-spend
-    userBalances[userId] -= amount;
-
-    try {
-        const message = `💸 *New Withdrawal Request!*\n\n👤 Name: ${firstName}\n🔗 Username: @${username || 'N/A'}\n🆔 ID: ${userId}\n🏦 Method: ${paymentMethod.toUpperCase()}\n💳 Account No: \`${accountNumber}\`\n💵 Amount: ${amount} ETB`;
-        const tgUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        
-        await fetch(tgUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: TELEGRAM_WITHDRAWAL_CHANNEL_ID,
-                text: message,
-                parse_mode: 'Markdown'
-            })
-        });
-
-        res.json({ success: true, newBalance: userBalances[userId] });
-    } catch (err) {
-        console.error("Failed to send withdrawal notification", err);
-        // If it fails to send to Telegram, refund the user
-        userBalances[userId] += amount;
-        res.status(500).json({ success: false, error: "Network error sending request." });
-    }
-});
-
-// 6. Deposit Request with Receipt Image (Sends to Telegram with Approve/Reject buttons)
+// 8. Deposit Request with Receipt Image
 app.post('/api/deposit/request', async (req, res) => {
     const { userId, firstName, username, paymentMethod, amount, receiptBase64 } = req.body;
 
@@ -150,7 +96,7 @@ app.post('/api/deposit/request', async (req, res) => {
         formData.append('caption', message);
         formData.append('parse_mode', 'Markdown');
         
-        // Add Interactive Approve/Reject Buttons to the Telegram message
+        // Add Interactive Approve/Reject Buttons to the Telegram message!
         formData.append('reply_markup', JSON.stringify({
             inline_keyboard: [
                 [
@@ -159,7 +105,6 @@ app.post('/api/deposit/request', async (req, res) => {
                 ]
             ]
         }));
-
         const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
             method: 'POST',
             body: formData
@@ -169,17 +114,18 @@ app.post('/api/deposit/request', async (req, res) => {
         
         if (!tgResult.ok) {
             console.error("Telegram API Error:", tgResult);
-            return res.status(500).json({ success: false, error: "Failed to send to Telegram" });
+            // THIS WILL NOW SHOW YOU THE EXACT ERROR ON YOUR PHONE!
+            return res.status(400).json({ success: false, error: tgResult.description });
         }
 
         res.json({ success: true });
     } catch (err) {
         console.error("Failed to send deposit request", err);
-        res.status(500).json({ success: false, error: "Server error" });
+        res.status(500).json({ success: false, error: "Server error processing image" });
     }
 });
 
-// 7. Webhook to Handle Telegram Button Clicks (Approve/Reject)
+// 9. Webhook to Handle Telegram Button Clicks (Approve/Reject)
 app.post('/api/telegram/webhook', async (req, res) => {
     const update = req.body;
     
@@ -234,7 +180,6 @@ app.post('/api/telegram/webhook', async (req, res) => {
             console.error("Webhook error:", e);
         }
     }
-    // Always acknowledge the webhook quickly
     res.sendStatus(200);
 });
 
