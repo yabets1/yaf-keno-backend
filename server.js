@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
-app.use(express.json({ limit: '20mb' })); // Allows large image uploads for receipts
+app.use(express.json({ limit: '30mb' })); // Allows large image uploads for receipts
 
 // In-memory databases (Resets when free Render server sleeps)
 let userBalances = {};
@@ -15,9 +15,9 @@ let registeredUsers = {};
 // 🚨 TELEGRAM BOT CREDENTIALS 🚨
 // Replace these with your real details!
 const TELEGRAM_BOT_TOKEN = '8817002947:AAHLpPF5F4QH7GNKIaxoxBEv9wOth_TumIk'; 
-const TELEGRAM_REGISTRATION_CHANNEL_ID = 'ID: -1004345822083'; 
-const TELEGRAM_WITHDRAWAL_CHANNEL_ID = 'ID: -1003903639876'; 
-const TELEGRAM_DEPOSIT_CHANNEL_ID = 'ID: -1004338096507';
+const TELEGRAM_REGISTRATION_CHANNEL_ID = '-1004345822083'; 
+const TELEGRAM_WITHDRAWAL_CHANNEL_ID = '-1003903639876'; 
+const TELEGRAM_DEPOSIT_CHANNEL_ID = '-1004338096507';
 // ==========================================
 
 // Friendly Root Message
