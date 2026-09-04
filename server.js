@@ -44,15 +44,23 @@ app.get('/api/balance/:userId', (req, res) => {
     res.json({ registered: true, balance: userBalances[userId] });
 });
 
-// 2. Register New User (10 ETB Bonus)
+// 2. Register New User (Or Restore Lost Memory)
 app.post('/api/register', async (req, res) => {
-    const { userId, firstName, username, phone } = req.body;
+    const { userId, firstName, username, phone, restoreBalance } = req.body;
     
     if (registeredUsers[userId]) {
         return res.status(400).json({ error: "Already registered", balance: userBalances[userId] });
     }
 
     registeredUsers[userId] = true;
+    
+    // 🔥 If the server woke up from sleep, restore the balance from the phone!
+    if (restoreBalance !== undefined) {
+        userBalances[userId] = restoreBalance;
+        return res.json({ success: true, balance: userBalances[userId] });
+    }
+
+    // Otherwise, it's a brand new player. Give 10 ETB.
     userBalances[userId] = 10.00; 
     
     try {
@@ -74,7 +82,6 @@ app.post('/api/register', async (req, res) => {
 
     res.json({ success: true, balance: userBalances[userId] });
 });
-
 // 3. Process Bet
 app.post('/api/bet', (req, res) => {
     const { userId, betAmount } = req.body;
