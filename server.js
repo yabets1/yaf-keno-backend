@@ -19,7 +19,7 @@ const TELEGRAM_BOT_TOKEN = '8817002947:AAHLpPF5F4QH7GNKIaxoxBEv9wOth_TumIk';
 const TELEGRAM_REGISTRATION_CHANNEL_ID = '-1004345822083'; 
 const TELEGRAM_WITHDRAWAL_CHANNEL_ID = '-1003903639876'; 
 const TELEGRAM_DEPOSIT_CHANNEL_ID = '-1004338096507';
-const ADMIN_TELEGRAM_IDS = ['404211177', '1847040245'];
+const ADMIN_TELEGRAM_IDS = ['404211177', '1847040245']; // 🔥 ADD ADMIN IDS HERE
 // ==========================================
 
 // Friendly Root Message
@@ -250,8 +250,8 @@ app.post('/api/telegram/webhook', async (req, res) => {
 
 // 8. Secret Admin Stats Endpoint
 app.get('/api/admin/stats/:userId', (req, res) => {
-    // 🔥 BULLETPROOF CHECK: Converts both to strings so it never fails even if quotes are missing
-    if (String(req.params.userId) !== String(ADMIN_TELEGRAM_ID) && req.params.userId !== 'fallback_user') {
+    // 🔥 BULLETPROOF CHECK: Checks if the requesting ID is inside your array of Admin IDs
+    if (!ADMIN_TELEGRAM_IDS.includes(String(req.params.userId)) && req.params.userId !== 'fallback_user') {
         return res.status(403).json({ error: "Unauthorized. ID does not match." });
     }
     
