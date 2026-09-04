@@ -246,8 +246,9 @@ app.post('/api/telegram/webhook', async (req, res) => {
 
 // 8. Secret Admin Stats Endpoint
 app.get('/api/admin/stats/:userId', (req, res) => {
-    if (req.params.userId !== ADMIN_TELEGRAM_ID && req.params.userId !== 'fallback_user') {
-        return res.status(403).json({ error: "Unauthorized" });
+    // 🔥 BULLETPROOF CHECK: Converts both to strings so it never fails even if quotes are missing
+    if (String(req.params.userId) !== String(ADMIN_TELEGRAM_ID) && req.params.userId !== 'fallback_user') {
+        return res.status(403).json({ error: "Unauthorized. ID does not match." });
     }
     res.json({
         totalUsers: Object.keys(registeredUsers).length,
