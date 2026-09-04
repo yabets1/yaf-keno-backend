@@ -10,6 +10,7 @@ app.use(express.json({ limit: '50mb' })); // Allows large image uploads for rece
 // In-memory databases
 let userBalances = {};
 let registeredUsers = {};
+let globalStats = { deposits: 0, withdrawals: 0, bets: 0, payouts: 0 }; // 🔥 NEW STATS TRACKER
 
 // ==========================================
 // 🚨 TELEGRAM BOT CREDENTIALS 🚨
@@ -17,6 +18,7 @@ const TELEGRAM_BOT_TOKEN = '8817002947:AAHLpPF5F4QH7GNKIaxoxBEv9wOth_TumIk';
 const TELEGRAM_REGISTRATION_CHANNEL_ID = '-1004345822083'; 
 const TELEGRAM_WITHDRAWAL_CHANNEL_ID = '-1003903639876'; 
 const TELEGRAM_DEPOSIT_CHANNEL_ID = '-1004338096507';
+const ADMIN_TELEGRAM_ID = '404211177'; // 🔥 PUT YOUR ID HERE!
 // ==========================================
 
 // Friendly Root Message
@@ -54,13 +56,11 @@ app.post('/api/register', async (req, res) => {
 
     registeredUsers[userId] = true;
     
-    // 🔥 If the server woke up from sleep, restore the balance from the phone!
     if (restoreBalance !== undefined) {
         userBalances[userId] = restoreBalance;
         return res.json({ success: true, balance: userBalances[userId] });
     }
 
-    // Otherwise, it's a brand new player. Give 10 ETB.
     userBalances[userId] = 10.00; 
     
     try {
@@ -82,6 +82,7 @@ app.post('/api/register', async (req, res) => {
 
     res.json({ success: true, balance: userBalances[userId] });
 });
+
 // 3. Process Bet
 app.post('/api/bet', (req, res) => {
     const { userId, betAmount } = req.body;
@@ -89,6 +90,7 @@ app.post('/api/bet', (req, res) => {
         return res.status(400).json({ success: false, error: 'Insufficient balance' });
     }
     userBalances[userId] -= betAmount;
+    globalStats.bets += betAmount; // 🔥 TRACK BET
     res.json({ success: true, newBalance: userBalances[userId] });
 });
 
@@ -97,6 +99,7 @@ app.post('/api/win', (req, res) => {
     const { userId, winAmount } = req.body;
     if (!userBalances[userId]) userBalances[userId] = 0;
     userBalances[userId] += winAmount;
+    globalStats.payouts += winAmount; // 🔥 TRACK PAYOUT
     res.json({ success: true, newBalance: userBalances[userId] });
 });
 
@@ -130,6 +133,7 @@ app.post('/api/withdraw', async (req, res) => {
             return res.status(500).json({ success: false, error: tgResult.description || "Telegram rejected the message" });
         }
 
+        globalStats.withdrawals += amount; // 🔥 TRACK WITHDRAWAL
         res.json({ success: true, newBalance: userBalances[userId] });
     } catch (err) {
         console.error("Failed to send withdrawal notification", err);
@@ -183,7 +187,7 @@ app.post('/api/deposit/request', async (req, res) => {
     }
 });
 
-// 7. Webhook for Interactive Buttons (With Self-Healing)
+// 7. Webhook for Interactive Buttons
 app.post('/api/telegram/webhook', async (req, res) => {
     const update = req.body;
     
@@ -202,8 +206,8 @@ app.post('/api/telegram/webhook', async (req, res) => {
                 if (!userBalances[userId]) userBalances[userId] = 0;
                 userBalances[userId] += amount;
                 
-                // 🔥 SELF-HEALING: Ensure the server knows they are registered
                 registeredUsers[userId] = true;
+                globalStats.deposits += amount; // 🔥 TRACK APPROVED DEPOSIT
 
                 await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageCaption`, {
                     method: 'POST',
@@ -238,6 +242,21 @@ app.post('/api/telegram/webhook', async (req, res) => {
         }
     }
     res.sendStatus(200);
+});
+
+// 8. Secret Admin Stats Endpoint
+app.get('/api/admin/stats/:userId', (req, res) => {
+    if (req.params.userId !== ADMIN_TELEGRAM_ID && req.params.userId !== 'fallback_user') {
+        return res.status(403).json({ error: "Unauthorized" });
+    }
+    res.json({
+        totalUsers: Object.keys(registeredUsers).length,
+        todayDeposits: globalStats.deposits,
+        todayWithdrawals: globalStats.withdrawals,
+        totalBets: globalStats.bets,
+        totalPayouts: globalStats.payouts,
+        netRevenue: globalStats.bets - globalStats.payouts
+    });
 });
 
 // Start the server
