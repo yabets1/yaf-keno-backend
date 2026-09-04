@@ -10,6 +10,7 @@ app.use(express.json({ limit: '50mb' })); // Allows large image uploads for rece
 // In-memory databases
 let userBalances = {};
 let registeredUsers = {};
+let userProfiles = {}; // 🔥 NEW: Stores user names, phones, etc.
 let globalStats = { deposits: 0, withdrawals: 0, bets: 0, payouts: 0 }; // 🔥 NEW STATS TRACKER
 
 // ==========================================
@@ -18,7 +19,7 @@ const TELEGRAM_BOT_TOKEN = '8817002947:AAHLpPF5F4QH7GNKIaxoxBEv9wOth_TumIk';
 const TELEGRAM_REGISTRATION_CHANNEL_ID = '-1004345822083'; 
 const TELEGRAM_WITHDRAWAL_CHANNEL_ID = '-1003903639876'; 
 const TELEGRAM_DEPOSIT_CHANNEL_ID = '-1004338096507';
-const ADMIN_TELEGRAM_ID = '404211177'; // 🔥 PUT YOUR ID HERE!
+const ADMIN_TELEGRAM_ID = 'YOUR_TELEGRAM_USER_ID'; // 🔥 PUT YOUR ID HERE!
 // ==========================================
 
 // Friendly Root Message
@@ -55,6 +56,9 @@ app.post('/api/register', async (req, res) => {
     }
 
     registeredUsers[userId] = true;
+    
+    // 🔥 Save their info for the Admin Dashboard!
+    userProfiles[userId] = { firstName, username, phone };
     
     if (restoreBalance !== undefined) {
         userBalances[userId] = restoreBalance;
@@ -250,13 +254,24 @@ app.get('/api/admin/stats/:userId', (req, res) => {
     if (String(req.params.userId) !== String(ADMIN_TELEGRAM_ID) && req.params.userId !== 'fallback_user') {
         return res.status(403).json({ error: "Unauthorized. ID does not match." });
     }
+    
+    // 🔥 Build the complete player list
+    const players = Object.keys(registeredUsers).map(id => ({
+        id,
+        balance: userBalances[id] || 0,
+        firstName: userProfiles[id]?.firstName || 'Player',
+        username: userProfiles[id]?.username || 'N/A',
+        phone: userProfiles[id]?.phone || 'N/A'
+    }));
+
     res.json({
         totalUsers: Object.keys(registeredUsers).length,
         todayDeposits: globalStats.deposits,
         todayWithdrawals: globalStats.withdrawals,
         totalBets: globalStats.bets,
         totalPayouts: globalStats.payouts,
-        netRevenue: globalStats.bets - globalStats.payouts
+        netRevenue: globalStats.bets - globalStats.payouts,
+        players: players // 🔥 Send players list to frontend
     });
 });
 
