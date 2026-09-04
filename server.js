@@ -7,9 +7,12 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json({ limit: '50mb' })); // Allows large image uploads for receipts
 
+// In-memory databases
+let userBalances = {};
+let registeredUsers = {};
+
 // ==========================================
 // 🚨 TELEGRAM BOT CREDENTIALS 🚨
-// Replace these with your real details!
 const TELEGRAM_BOT_TOKEN = '8817002947:AAHLpPF5F4QH7GNKIaxoxBEv9wOth_TumIk'; 
 const TELEGRAM_REGISTRATION_CHANNEL_ID = '-1004345822083'; 
 const TELEGRAM_WITHDRAWAL_CHANNEL_ID = '-1003903639876'; 
@@ -21,12 +24,17 @@ app.get('/', (req, res) => {
     res.send('Welcome to the BRIGHTEN.BET API! Server is running perfectly.');
 });
 
-// 1. Check Balance & Registration Status
+// 1. Check Balance & Registration Status (With Self-Healing)
 app.get('/api/balance/:userId', (req, res) => {
     const userId = req.params.userId;
     
     if (userId === 'browser_test') {
         return res.json({ balance: 50 });
+    }
+    
+    // 🔥 SELF-HEALING: If they have money in memory, they are registered!
+    if (userBalances[userId] !== undefined) {
+        registeredUsers[userId] = true;
     }
     
     if (!registeredUsers[userId]) {
@@ -35,10 +43,6 @@ app.get('/api/balance/:userId', (req, res) => {
     
     res.json({ registered: true, balance: userBalances[userId] });
 });
-
-// In-memory databases
-let userBalances = {};
-let registeredUsers = {};
 
 // 2. Register New User (10 ETB Bonus)
 app.post('/api/register', async (req, res) => {
@@ -172,7 +176,7 @@ app.post('/api/deposit/request', async (req, res) => {
     }
 });
 
-// 7. Webhook for Interactive Buttons
+// 7. Webhook for Interactive Buttons (With Self-Healing)
 app.post('/api/telegram/webhook', async (req, res) => {
     const update = req.body;
     
@@ -190,6 +194,9 @@ app.post('/api/telegram/webhook', async (req, res) => {
 
                 if (!userBalances[userId]) userBalances[userId] = 0;
                 userBalances[userId] += amount;
+                
+                // 🔥 SELF-HEALING: Ensure the server knows they are registered
+                registeredUsers[userId] = true;
 
                 await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageCaption`, {
                     method: 'POST',
