@@ -10,8 +10,8 @@ app.use(express.json({ limit: '50mb' })); // Allows large image uploads
 // In-memory databases
 let userBalances = {};
 let registeredUsers = {};
-let userProfiles = {}; // 🔥 NEW: Stores user names, phones, etc.
-let globalStats = { deposits: 0, withdrawals: 0, bets: 0, payouts: 0 }; // 🔥 NEW STATS TRACKER
+let userProfiles = {}; // Stores user names, phones, etc.
+let globalStats = { deposits: 0, withdrawals: 0, bets: 0, payouts: 0 }; // STATS TRACKER
 
 // ==========================================
 // 🚨 TELEGRAM BOT CREDENTIALS 🚨
@@ -19,23 +19,24 @@ const TELEGRAM_BOT_TOKEN = '8817002947:AAHLpPF5F4QH7GNKIaxoxBEv9wOth_TumIk';
 const TELEGRAM_REGISTRATION_CHANNEL_ID = '-1004345822083'; 
 const TELEGRAM_WITHDRAWAL_CHANNEL_ID = '-1003903639876'; 
 const TELEGRAM_DEPOSIT_CHANNEL_ID = '-1004338096507';
-const ADMIN_TELEGRAM_IDS = ['404211177', '1847040245']; // 🔥 ADD ADMIN IDS HERE
+const ADMIN_TELEGRAM_IDS = ['404211177', '1847040245']; // 🔥 MULTIPLE ADMINS SUPPORTED
 // ==========================================
 
 // 🔥 NEW: LIVE GLOBAL KENO ENGINE 🔥
 // This runs constantly on the server. All players will sync to this!
 let kenoState = {
     roundId: 1000,
-    gameState: 'BETTING', // BETTING (50s), DRAWING (20s), RESULT (5s)
-    timeLeft: 75,
-    winningNumbers: []
+    gameState: 'BETTING', // BETTING (50s), DRAWING (20s), RESULT (10s)
+    timeLeft: 80,
+    winningNumbers: [],
+    history: [] // Stores previous rounds
 };
 
 setInterval(() => {
     kenoState.timeLeft--;
 
-    // Time to stop betting and draw numbers! (At 25 seconds left)
-    if (kenoState.timeLeft === 25 && kenoState.gameState === 'BETTING') {
+    // Time to stop betting and draw numbers! (At 30 seconds left)
+    if (kenoState.timeLeft === 30 && kenoState.gameState === 'BETTING') {
         kenoState.gameState = 'DRAWING';
         let nums = new Set();
         while(nums.size < 20) {
@@ -43,15 +44,19 @@ setInterval(() => {
         }
         kenoState.winningNumbers = Array.from(nums);
     } 
-    // Time to show final results! (At 5 seconds left)
-    else if (kenoState.timeLeft === 5 && kenoState.gameState === 'DRAWING') {
+    // Time to show final results! (At 10 seconds left)
+    else if (kenoState.timeLeft === 10 && kenoState.gameState === 'DRAWING') {
         kenoState.gameState = 'RESULT';
     } 
     // Reset for the next round! (At 0 seconds)
     else if (kenoState.timeLeft <= 0) {
+        // Save round to history before resetting
+        kenoState.history.unshift({ roundId: kenoState.roundId, winningNumbers: [...kenoState.winningNumbers] });
+        if (kenoState.history.length > 20) kenoState.history.pop();
+
         kenoState.roundId++;
         kenoState.gameState = 'BETTING';
-        kenoState.timeLeft = 75;
+        kenoState.timeLeft = 80;
         kenoState.winningNumbers = [];
     }
 }, 1000);
@@ -67,16 +72,19 @@ app.get('/', (req, res) => {
     res.send('Welcome to the BRIGHTEN.BET API! Server is running perfectly.');
 });
 
+// 1. Check Balance & Registration Status (With Self-Healing)
 app.get('/api/balance/:userId', (req, res) => {
     const userId = req.params.userId;
     if (userId === 'browser_test') return res.json({ balance: 50 });
     
+    // SELF-HEALING
     if (userBalances[userId] !== undefined) registeredUsers[userId] = true;
     if (!registeredUsers[userId]) return res.json({ registered: false, balance: 0 });
     
     res.json({ registered: true, balance: userBalances[userId] });
 });
 
+// 2. Register New User (Or Restore Lost Memory)
 app.post('/api/register', async (req, res) => {
     const { userId, firstName, username, phone, restoreBalance } = req.body;
     
@@ -87,6 +95,7 @@ app.post('/api/register', async (req, res) => {
     registeredUsers[userId] = true;
     userProfiles[userId] = { firstName, username, phone };
     
+    // If restoring from phone memory
     if (restoreBalance !== undefined) {
         userBalances[userId] = restoreBalance;
         return res.json({ success: true, balance: userBalances[userId] });
@@ -103,6 +112,7 @@ app.post('/api/register', async (req, res) => {
     res.json({ success: true, balance: userBalances[userId] });
 });
 
+// 3. Process Bet
 app.post('/api/bet', (req, res) => {
     const { userId, betAmount } = req.body;
     if (!userBalances[userId] || userBalances[userId] < betAmount) {
@@ -113,6 +123,7 @@ app.post('/api/bet', (req, res) => {
     res.json({ success: true, newBalance: userBalances[userId] });
 });
 
+// 4. Process Win
 app.post('/api/win', (req, res) => {
     const { userId, winAmount } = req.body;
     if (!userBalances[userId]) userBalances[userId] = 0;
@@ -121,6 +132,7 @@ app.post('/api/win', (req, res) => {
     res.json({ success: true, newBalance: userBalances[userId] });
 });
 
+// 5. Withdrawal Request
 app.post('/api/withdraw', async (req, res) => {
     const { userId, firstName, username, paymentMethod, accountNumber, amount } = req.body;
     if (!userBalances[userId] || userBalances[userId] < amount) return res.status(400).json({ success: false, error: "Insufficient balance" });
@@ -145,6 +157,7 @@ app.post('/api/withdraw', async (req, res) => {
     }
 });
 
+// 6. Deposit Request
 app.post('/api/deposit/request', async (req, res) => {
     const { userId, firstName, username, paymentMethod, amount, receiptBase64 } = req.body;
     try {
@@ -170,6 +183,7 @@ app.post('/api/deposit/request', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, error: "Server error" }); }
 });
 
+// 7. Webhook for Interactive Buttons
 app.post('/api/telegram/webhook', async (req, res) => {
     const update = req.body;
     if (update.callback_query) {
@@ -208,6 +222,7 @@ app.post('/api/telegram/webhook', async (req, res) => {
     res.sendStatus(200);
 });
 
+// 8. Secret Admin Stats Endpoint
 app.get('/api/admin/stats/:userId', (req, res) => {
     if (!ADMIN_TELEGRAM_IDS.includes(String(req.params.userId)) && req.params.userId !== 'fallback_user') {
         return res.status(403).json({ error: "Unauthorized." });
